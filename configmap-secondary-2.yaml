@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-secondary-2-config
+  namespace: mysql-innodb-cluster
+data:
+  MYSQL_ROOT_PASSWORD: 'baifendian'
+  mysqld.cnf: |
+         [mysqld]
+         server-id = 30002
+         port = 3306
+         report-host = mysql-secondary2-0.mysql-service 
+         report-port = 3306
+         pid-file        = /var/run/mysqld/mysqld.pid
+         socket          = /var/run/mysqld/mysqld.sock
+         datadir         = /var/lib/mysql
+         bind-address   = 0.0.0.0
+         explicit_defaults_for_timestamp = true
+         log_timestamps=SYSTEM
+         
+         ####### binary logs
+         #log_bin=/var/lib/mysql/logs/binlog/binlog-ds
+         log_bin=mysql-bin
+         binlog-format=ROW
+         binlog-rows-query-log-events=1
+         sync_binlog=1
+         log-slave-updates=true
+         expire_logs_days = 7
+         max_binlog_size = 64M
+         max_binlog_cache_size = 64M
+         binlog_checksum=NONE
+         log_error=/var/log/mysql/error.log
+         
+         max_connections = 2000
+         max_user_connections = 1000
+         max_allowed_packet=64M
+         
+         ######## GTID
+         gtid-mode=on
+         enforce-gtid-consistency=true
+         master_info_repository=TABLE
+         relay_log_info_repository=TABLE
+         
+         ########## character setting
+         character-set-server = utf8
+         init_connect = 'SET NAMES utf8'
+         
+         ########## case setting
+         lower_case_table_names = 1
+         
+         ######### INNODB
+         default_storage_engine = innodb
+         # disabled_storage_engines=BLACKHOLE,FEDERATED,CSV,ARCHIVE
+         innodb_buffer_pool_size = 128M
+         
+         #optimization
+         transaction_write_set_extraction=XXHASH64
+         
+         ########## sql mode setting
+         #sql_mode = NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES
+         
+         #multi thread
+         
+         auto_increment_increment = 1
+         auto_increment_offset = 2
+
+         #Group Replication Settings
+         plugin_load_add='group_replication.so'
+         group_replication_group_name="5680590c-a0de-11ec-a2b5-4ec839f9f605"
+         #group_replication_start_on_boot=on
+         group_replication_start_on_boot=off
+         group_replication_local_address="mysql-secondary2-0.mysql-service:33061"
+         group_replication_group_seeds="mysql-primary-0.mysql-service:33061,mysql-secondary1-0.mysql-service:33061,mysql-secondary2-0.mysql-service:33061"
+         group_replication_ip_whitelist='mysql-primary-0.mysql-service,mysql-secondary1-0.mysql-service,mysql-secondary2-0.mysql-service'
+         #group_replication_bootstrap_group=on
+         group_replication_bootstrap_group=off
+         group_replication_single_primary_mode=on
+         group_replication_enforce_update_everywhere_checks=off

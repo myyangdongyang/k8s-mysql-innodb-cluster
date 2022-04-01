@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-primary
+  namespace: mysql-innodb-cluster
+spec:
+  replicas: 1
+  serviceName: mysql-service
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: harbor.percent.cn/agl_mat/mysql:5.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: mysql
+          containerPort: 3306
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: mysql-primary-config
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-conf
+          mountPath: /etc/mysql/mysql.conf.d
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+      - name: xtrabackup
+        image: harbor.percent.cn/agl_mat/percona-xtrabackup:2.4.2
+        ports:
+        - name: mysqlrouter
+          containerPort: 6446
+          protocol: TCP
+        command:
+        - bash
+        - "-c"
+        - |
+          echo "Waiting for mysqld to be ready (accepting connections)"
+          until mysql -h 127.0.0.1 -uroot -pbaifendian -e "SELECT 1"; do sleep 1; done
+          until mysql -h mysql-secondary1-0.mysql-service -uroot -pbaifendian -e "SELECT 1"; do sleep 1; done
+          until mysql -h mysql-secondary2-0.mysql-service -uroot -pbaifendian -e "SELECT 1"; do sleep 1; done
+          
+          #[[ `hostname` =~ -([0-9]+)$ ]] || exit 1
+          #mysql -h 127.0.0.1 -uroot -pbaifendian -e "CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'baifendian';"
+          #mysql -h 127.0.0.1 -uroot -pbaifendian -e "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
+          #mysql -h 127.0.0.1 -uroot -pbaifendian -e "FLUSH PRIVILEGES;"
+          #mysql -h 127.0.0.1 -uroot -pbaifendian -e "CHANGE MASTER TO MASTER_USER='repl', MASTER_PASSWORD='baifendian' FOR CHANNEL 'group_replication_recovery';"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "change master to master_user='root',master_password='baifendian' for channel 'group_replication_recovery';"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "set global group_replication_bootstrap_group=on;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "start group_replication;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "set global group_replication_bootstrap_group=off;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "select * from performance_schema.replication_group_members;"
+          
+          mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- dba check-instance-configuration
+          mysqlsh --uri root:baifendian@mysql-secondary1-0.mysql-service:3306 -- dba check-instance-configuration
+          mysqlsh --uri root:baifendian@mysql-secondary2-0.mysql-service:3306 -- dba check-instance-configuration
+
+          yes | mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- dba create-cluster "mysql_cluster"
+          yes I | mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- cluster add-instance "root:baifendian@mysql-secondary1-0.mysql-service:3306"
+          yes I | mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- cluster add-instance "root:baifendian@mysql-secondary2-0.mysql-service:3306"
+
+          mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- cluster status
+          #mysqlrouter
+          mkdir -p /opt/mysqlrouter/config
+          mysqlrouter --bootstrap=root:baifendian@mysql-primary-0.mysql-service:3306 --directory=/opt/mysqlrouter/config --user=root --force
+          sh /opt/mysqlrouter/config/start.sh
+          #sleep 10000000000000
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-conf
+          mountPath: /etc/mysql/mysql.conf.d
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+      volumes:
+      - name: mysql-conf
+        configMap:
+          name: mysql-primary-config
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: mysql-nfs-storage
+      resources:
+        requests:
+          storage: 500Gi

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mysql-innodb-cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: mysql-innodb-cluster
+  name: mysql-service
+spec:
+  ports:
+  - name: mysql-service
+    port: 3306
+  clusterIP: None
+  selector:
+    app: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: mysql-innodb-cluster
+  name: mysql-router
+spec:
+  ports:
+  - name: mysql-router
+    port: 6446
+    nodePort: 30644
+  type: NodePort
+  selector:
+    app: mysql

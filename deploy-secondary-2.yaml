@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-secondary2
+  namespace: mysql-innodb-cluster
+spec:
+  replicas: 1
+  serviceName: mysql-service
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: harbor.percent.cn/agl_mat/mysql:5.7
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: mysql
+          containerPort: 3306
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: mysql-secondary-2-config
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-conf
+          mountPath: /etc/mysql/mysql.conf.d
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+      - name: xtrabackup
+        image: harbor.percent.cn/agl_mat/percona-xtrabackup:2.4.2
+        ports:
+        - name: mysqlrouter
+          containerPort: 6446
+          protocol: TCP
+        command:
+        - bash
+        - "-c"
+        - |
+          echo "Waiting for mysqld to be ready (accepting connections)"
+          until mysql -h 127.0.0.1 -uroot -pbaifendian -e "SELECT 1"; do sleep 1; done
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "RESET MASTER;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "set global group_replication_allow_local_disjoint_gtids_join=ON;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "start group_replication;"
+          mysql -h 127.0.0.1 -uroot -pbaifendian -e "select * from performance_schema.replication_group_members;"
+          mysqlsh --uri root:baifendian@mysql-primary-0.mysql-service:3306 -- cluster status
+          #mysqlrouter
+          mkdir -p /opt/mysqlrouter/config
+          mysqlrouter --bootstrap=root:baifendian@mysql-primary-0.mysql-service:3306 --directory=/opt/mysqlrouter/config --user=root --force
+          sh /opt/mysqlrouter/config/start.sh
+          
+          #sleep 10000000000000
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+        - name: mysql-conf
+          mountPath: /etc/mysql/mysql.conf.d
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+      volumes:
+      - name: mysql-conf
+        configMap:
+          name: mysql-secondary-2-config 
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: mysql-nfs-storage
+      resources:
+        requests:
+          storage: 500Gi
